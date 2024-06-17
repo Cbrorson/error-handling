@@ -1,0 +1,91 @@
+<mule xmlns:validation="http://www.mulesoft.org/schema/mule/validation"
+    xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw"
+    xmlns:http="http://www.mulesoft.org/schema/mule/http" 
+    xmlns:db="http://www.mulesoft.org/schema/mule/db"
+    xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+    xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce" 
+    xmlns="http://www.mulesoft.org/schema/mule/core" 
+    xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" 
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+    xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd 
+    http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd 
+    http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/mule-dw.xsd
+    http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+    http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/current/mule-salesforce.xsd
+    http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+    http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+    http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <db:config name="Database_Config" doc:name="Database Config" doc:id="144ac4cf-fc39-499a-b048-228b24b33f20" >
+        <db:my-sql-connection host="localhost" port="3306" user="root" password="javaintegration" database="salesforce" />
+    </db:config>
+
+    <http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="1994edf0-64e0-45be-b7ee-e7e6743d5b70" >
+        <http:listener-connection host="0.0.0.0" port="8081" readTimeout="3000" />
+    </http:listener-config>
+
+    <http:request-config name="HTTP_Request_config" doc:name="HTTP Request config" doc:id="10124f69-aaad-4226-b44c-f24b1dca885c">
+        <http:request-connection host="example.com" port="443" protocol="HTTPS"/>
+    </http:request-config>
+
+    <flow name="exampleFlow">
+        <!-- Input Stage. Incoming requests-->
+        <http:listener config-ref="HTTP_Listener_config" path="/process" doc:name="HTTP Listener"/>
+
+        <!-- Validation Stage. Transforms data to JSON and validates that It's not null-->
+        <dw:transform-message doc:name="Transform to JSON">
+            <dw:set-payload><![CDATA[%dw 2.0
+            output application/json
+            ---
+            payload]]></dw:set-payload>
+        </dw:transform-message>
+
+        <validation:is-true expression="#[payload != null]" message="Payload cannot be null" doc:name="Validate Payload"/>
+
+        <!-- Try Scope. Catches potential errors -->
+        <try doc:name="Try">
+            <!-- Transformation Stage -->
+            <dw:transform-message doc:name="Transform Message">
+                <dw:set-payload><![CDATA[%dw 2.0
+                output application/json
+                ---
+                {
+                    message: "Processed Data",
+                    original: payload
+                }]]></dw:set-payload>
+            </dw:transform-message>
+
+            <!-- Processing Stage -->
+            <db:select config-ref="Database_Config" doc:name="Database Query">
+                <db:sql>SELECT * FROM `table` WHERE id = #[payload.id]</db:sql>
+            </db:select>
+
+            <http:request config-ref="HTTP_Request_config" method="POST" doc:name="HTTP Request" path="/api">
+                <http:request-builder>
+                    <http:body><![CDATA[#[payload]]]></http:body>
+                </http:request-builder>
+            </http:request>
+
+            <!-- On Error Propagate -->
+            <on-error-propagate enableNotifications="true" doc:name="On Error Propagate">
+                <logger level="ERROR" doc:name="Logger" message="Error Occurred: #[error.description]"/>
+                <set-variable variableName="errorCode" value="#[error.errorCode]" doc:name="Set Variable"/>
+            </on-error-propagate>
+
+            <!-- On Error Continue -->
+            <on-error-continue enableNotifications="true" doc:name="On Error Continue">
+                <logger level="ERROR" doc:name="Logger" message="Handled Error: #[error.description]"/>
+                <set-variable variableName="errorMessage" value="#[error.description]" doc:name="Set Variable"/>
+            </on-error-continue>
+        </try>
+
+        <!-- Output Stage -->
+        <http:response statusCode="200" doc:name="HTTP Response">
+            <http:body><![CDATA[#[payload]]]></http:body>
+        </http:response>
+    </flow>
+
+</mule>
+
+
